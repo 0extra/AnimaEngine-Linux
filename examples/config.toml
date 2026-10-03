@@ -1,0 +1,6 @@
+file_path = "assets/default.gif"
+position_x = 100
+position_y = 100
+width = 300
+height = 300
+remove_bg = true

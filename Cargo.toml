@@ -1,0 +1,24 @@
+[package]
+name = "anima-linux"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+gtk4 = { version = "0.11", features = ["v4_12"] }
+gtk4-layer-shell = "0.8"
+image = "0.25"
+gif = "0.13"
+webp-animation = "0.9"
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
+anyhow = "1.0"
+log = "0.4"
+env_logger = "0.11"
+dirs = "5.0"
+ort = { version = "=2.0.0-rc.10", features = ["load-dynamic"] }
+ndarray = "0.16"
+gstreamer = "0.25"
+gstreamer-video = "0.25"
+gst-plugin-gtk4 = { version = "0.15", features = ["gtk_v4_12", "waylandegl"] }
+gstreamer-app = "0.25"
+rayon = "1.10"
