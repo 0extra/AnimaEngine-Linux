@@ -1,4 +1,5 @@
-use std::path::Path;
+use std::env;
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::OnceLock;
 
@@ -11,26 +12,78 @@ use ort::value::Value;
 
 static SESSION: OnceLock<Mutex<Session>> = OnceLock::new();
 
+fn find_model() -> Option<PathBuf> {
+    if let Ok(p) = env::var("ANIMA_MODEL_PATH") {
+        let pb = PathBuf::from(p);
+        if pb.exists() {
+            log::info!("Using model from ANIMA_MODEL_PATH: {}", pb.display());
+            return Some(pb);
+        } else {
+            log::warn!("ANIMA_MODEL_PATH set but not found: {}", pb.display());
+        }
+    }
+
+    let candidates: Vec<PathBuf> = {
+        let mut v = Vec::new();
+
+        v.push(PathBuf::from("models/u2net.onnx"));
+
+        if let Ok(exe) = env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                v.push(dir.join("models/u2net.onnx"));
+                if let Some(up1) = dir.parent() {
+                    if let Some(up2) = up1.parent() {
+                        v.push(up2.join("models/u2net.onnx"));
+                    }
+                }
+            }
+        }
+
+        if let Some(data_dir) = dirs::data_dir() {
+            v.push(data_dir.join("anima-linux/models/u2net.onnx"));
+        }
+        if let Some(home) = dirs::home_dir() {
+            v.push(home.join(".local/share/anima-linux/models/u2net.onnx"));
+        }
+
+        v
+    };
+
+    for c in &candidates {
+        if c.exists() {
+            log::info!("Found U²-Net model at: {}", c.display());
+            return Some(c.clone());
+        }
+    }
+
+    None
+}
+
 fn get_session() -> Result<&'static Mutex<Session>> {
     if let Some(s) = SESSION.get() {
         return Ok(s);
     }
 
-    let model_path = Path::new("models/u2net.onnx");
-    if !model_path.exists() {
-        return Err(anyhow!(
-            "Model not found at models/u2net.onnx. Download it with:\n\
+    let model_path = find_model().ok_or_else(|| {
+        anyhow!(
+            "Model not found. Looked in:\n\
+             - $ANIMA_MODEL_PATH\n\
+             - ./models/u2net.onnx\n\
+             - <exe_dir>/models/u2net.onnx\n\
+             - <exe_dir>/../../models/u2net.onnx\n\
+             - ~/.local/share/anima-linux/models/u2net.onnx\n\
+             \n\
+             Download it with:\n\
              mkdir -p models && \\\n\
              wget https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net.onnx -P models/"
-        ));
-    }
+        )
+    })?;
 
     let session = Session::builder()?
         .with_optimization_level(GraphOptimizationLevel::Level3)?
         .with_intra_threads(4)?
-        .commit_from_file(model_path)?;
+        .commit_from_file(&model_path)?;
 
-    // Атомарно: если другой поток успел создать — используем его, нашу сессию дропаем.
     let _ = SESSION.set(Mutex::new(session));
 
     SESSION
@@ -70,7 +123,7 @@ pub fn remove_bg_image(rgba: &RgbaImage) -> Result<RgbaImage> {
     let mask_w = shape[3];
     let data: Vec<f32> = output_array.iter().cloned().collect();
 
-    // U²-Net / ISNet output already in [0, 1] via sigmoid. No min/max normalization.
+    // U²-Net output already in [0, 1] via sigmoid. No min/max normalization.
     let mut mask_img = image::GrayImage::new(mask_w as u32, mask_h as u32);
     for y in 0..mask_h {
         for x in 0..mask_w {
