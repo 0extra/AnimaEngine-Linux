@@ -1,6 +1,6 @@
-# Anima-Linux
+# AnimaEngine-Linux
 
-An open-source alternative to [Anima Engine](https://store.steampowered.com/app/2617260/Anima_Engine/) for Linux. Overlay GIFs, videos, images, and animated WebP files on top of all windows with click-through support, plus AI-powered background removal.
+An open-source alternative to [Anima Engine](https://store.steampowered.com/app/3474900/Anima_Engine/) for Linux. Overlay GIFs, videos, images, and animated WebP files on top of all windows with click-through support, plus AI-powered background removal.
 
 Built for Wayland compositors (Hyprland, Sway, DriftWM, KDE Plasma 6) with fallback to X11.
 
@@ -58,7 +58,7 @@ First build takes 5–15 minutes because of GStreamer and ONNX Runtime bindings.
 The app uses **U²-Net** via ONNX Runtime.
 
 ```bash
-cd Anima-Linux
+cd AnimaEngine-Linux
 mkdir -p models
 wget https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net.onnx -P models/
 ```
@@ -97,7 +97,7 @@ Add to your DriftWM config:
 
 ```toml
 [[window_rules]]
-app_id = "com.github.anima-linux"
+app_id = "com.github.animaengine-linux"
 widget = true
 ```
 
