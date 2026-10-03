@@ -81,26 +81,6 @@ cargo run --release
 6. Drag the overlay with your mouse to position it anywhere
 7. Use the **Active overlays** list on the right to close individual overlays or all at once
 
-## Hyprland Configuration
-
-Add these rules to `~/.config/hypr/hyprland.conf` for correct overlay behavior:
-
-```text
-windowrulev2 = float, class:^(com.github.anima-linux)$
-windowrulev2 = pin, class:^(com.github.anima-linux)$
-windowrulev2 = noinitialfocus, class:^(com.github.anima-linux)$
-```
-
-## DriftWM Configuration
-
-Add to your DriftWM config:
-
-```toml
-[[window_rules]]
-app_id = "com.github.animaengine-linux"
-widget = true
-```
-
 ## Project Structure
 
 ```text
