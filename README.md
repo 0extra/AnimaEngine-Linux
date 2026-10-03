@@ -46,8 +46,8 @@ For NVIDIA GPU acceleration, replace `onnxruntime-cpu` with `onnxruntime-cuda`.
 ### Build
 
 ```bash
-git clone https://github.com/yourusername/Anima-Linux.git
-cd Anima-Linux
+git clone https://github.com/0extra/AnimaEngine-Linux.git
+cd AnimaEngine-Linux
 cargo build --release
 ```
 
