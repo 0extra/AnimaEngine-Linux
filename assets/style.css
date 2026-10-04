@@ -1,0 +1,121 @@
+window.anima-main {
+    background-color: #1a1a1a;
+    color: #e6e6e6;
+}
+window.anima-overlay {
+    background-color: transparent;
+    background-image: none;
+    box-shadow: none;
+    border: none;
+    margin: 0;
+    padding: 0;
+}
+window.anima-overlay > * {
+    background-color: transparent;
+    background-image: none;
+    box-shadow: none;
+    border: none;
+    margin: 0;
+    padding: 0;
+}
+.anima-title {
+    font-size: 1.05em;
+    font-weight: 600;
+    color: #cfcfcf;
+}
+button {
+    background-image: none;
+    background-color: #2d2d2d;
+    color: #e6e6e6;
+    border: 1px solid #3a3a3a;
+    border-radius: 6px;
+    padding: 6px 12px;
+    box-shadow: none;
+    text-shadow: none;
+}
+button:hover {
+    background-color: #3a3a3a;
+}
+button.anima-primary {
+    background-color: #5b3d99;
+    color: #ffffff;
+    border: 1px solid #7c5cbf;
+    font-weight: 600;
+}
+button.anima-primary:hover {
+    background-color: #6b4da9;
+}
+button.anima-primary:active {
+    background-color: #4b2d89;
+}
+button.anima-danger {
+    background-color: #6b2e2e;
+    color: #ffdddd;
+    border: 1px solid #8b3a3a;
+}
+button.anima-danger:hover {
+    background-color: #7b3e3e;
+}
+flowboxchild {
+    background-color: #252525;
+    border-radius: 8px;
+    padding: 8px;
+    border: 1px solid #2f2f2f;
+}
+flowboxchild:hover {
+    background-color: #2d2d2d;
+    border-color: #4a4a4a;
+}
+flowboxchild:selected {
+    border-color: #7c5cbf;
+    background-color: #2a2333;
+}
+frame {
+    background-color: #1a1a1a;
+    border: 1px solid #2f2f2f;
+    border-radius: 8px;
+}
+scale trough {
+    background-color: #2d2d2d;
+    border-radius: 6px;
+}
+scale highlight {
+    background-color: #7c5cbf;
+}
+progressbar trough {
+    background-color: #2d2d2d;
+    border-radius: 6px;
+    min-height: 8px;
+}
+progressbar progress {
+    background-color: #7c5cbf;
+    border-radius: 6px;
+    min-height: 8px;
+}
+entry, searchentry {
+    background-color: #2d2d2d;
+    color: #e6e6e6;
+    border-radius: 6px;
+    padding: 4px 8px;
+    border: 1px solid #3a3a3a;
+}
+listbox {
+    background-color: #202020;
+    border-radius: 6px;
+}
+listboxrow {
+    background-color: #252525;
+    border-bottom: 1px solid #2f2f2f;
+}
+listboxrow:hover {
+    background-color: #2d2d2d;
+}
+separator {
+    background-color: #2f2f2f;
+}
+checkbutton {
+    color: #e6e6e6;
+}
+.dim-label {
+    opacity: 0.6;
+}
