@@ -63,8 +63,8 @@ Tested on Ubuntu 22.04, 24.04 and Debian 12.
 ```bash
 sudo apt update
 sudo apt install -y \
-  build-essential pkg-config cmake git wget curl \
-  libgtk-4-dev \
+  build-essential pkg-config libssl-dev cmake git wget curl \
+  libgtk-4-dev libgtk4-layer-shell-dev \
   libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
   gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
   gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly \
@@ -91,7 +91,7 @@ Tested on Fedora 39, 40 and 41.
 ```bash
 sudo dnf install -y \
   gcc gcc-c++ make pkgconf-pkg-config cmake git wget curl \
-  gtk4-devel gtk4-layer-shell-devel \
+  gtk4-devel gtk4-layer-shell-devel openssl-devel \
   gstreamer1-devel gstreamer1-plugins-base-devel \
   gstreamer1-plugins-base gstreamer1-plugins-good \
   gstreamer1-plugins-bad-free gstreamer1-plugins-ugly-free \
