@@ -8,6 +8,16 @@ pub struct Config {
     pub width: i32,
     pub height: i32,
     pub remove_bg: bool,
+    #[serde(default = "default_ai_model")]
+    pub ai_model: String,
+    #[serde(default)]
+    pub ai_input_size: Option<u32>,
+    #[serde(default)]
+    pub models_dir: Option<String>,
+}
+
+fn default_ai_model() -> String {
+    "u2net".to_string()
 }
 
 impl Default for Config {
@@ -19,6 +29,9 @@ impl Default for Config {
             width: 300,
             height: 300,
             remove_bg: false,
+            ai_model: default_ai_model(),
+            ai_input_size: None,
+            models_dir: None,
         }
     }
 }

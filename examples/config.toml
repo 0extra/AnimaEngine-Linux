@@ -4,3 +4,6 @@ position_y = 100
 width = 300
 height = 300
 remove_bg = true
+ai_model = "u2net"
+ai_input_size = 320
+models_dir = "/path/to/models"

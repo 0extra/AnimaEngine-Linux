@@ -10,6 +10,7 @@ image = "0.25"
 gif = "0.13"
 webp-animation = "0.9"
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 toml = "0.8"
 anyhow = "1.0"
 log = "0.4"
@@ -19,6 +20,8 @@ ort = { version = "=2.0.0-rc.10", features = ["load-dynamic"] }
 ndarray = "0.16"
 gstreamer = "0.25"
 gstreamer-video = "0.25"
-gst-plugin-gtk4 = { version = "0.15", features = ["gtk_v4_12", "waylandegl"] }
+gstreamer-pbutils = "0.25"
+gst-plugin-gtk4 = { version = "0.15", features = ["gtk_v4_12", "waylandegl", "x11glx"] }
 gstreamer-app = "0.25"
 rayon = "1.10"
+libc = "0.2"

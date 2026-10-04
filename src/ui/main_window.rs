@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::mpsc::{self, TryRecvError};
@@ -15,6 +15,8 @@ use gtk4::{
     Scale, ScrolledWindow, SearchEntry, SelectionMode, Separator,
 };
 
+use crate::config::library::{LibraryData, LibraryItemData};
+use crate::config::overlays::{OverlayData, OverlaysFile};
 use crate::config::parser::Config;
 use crate::overlay::layer_surface;
 
@@ -29,12 +31,58 @@ pub struct OverlayEntry {
     pub window: gtk4::Window,
     pub label: String,
     pub source: PathBuf,
+    pub size: i32,
+    pub speed: f64,
+    pub position: Rc<Cell<(i32, i32)>>,
 }
 
 pub struct AppState {
     pub library: Vec<LibraryItem>,
     pub overlays: Vec<OverlayEntry>,
     pub selected: Option<usize>,
+}
+
+fn persist_library(state: &Rc<RefCell<AppState>>) {
+    let data = LibraryData {
+        items: state
+            .borrow()
+            .library
+            .iter()
+            .map(|it| LibraryItemData {
+                path: it.path.to_string_lossy().into_owned(),
+                name: it.name.clone(),
+                size: it.size,
+                speed: it.speed,
+            })
+            .collect(),
+    };
+    if let Err(e) = data.save() {
+        log::warn!("Failed to persist library: {}", e);
+    }
+}
+
+fn persist_overlays(state: &Rc<RefCell<AppState>>) {
+    let data = OverlaysFile {
+        items: state
+            .borrow()
+            .overlays
+            .iter()
+            .map(|e| {
+                let (x, y) = e.position.get();
+                OverlayData {
+                    source: e.source.to_string_lossy().into_owned(),
+                    name: e.label.clone(),
+                    size: e.size,
+                    speed: e.speed,
+                    x,
+                    y,
+                }
+            })
+            .collect(),
+    };
+    if let Err(e) = data.save() {
+        log::warn!("Failed to persist overlays: {}", e);
+    }
 }
 
 pub fn show(app: &Application) {
@@ -83,6 +131,26 @@ pub fn show(app: &Application) {
     flow_box.set_margin_start(10);
     flow_box.set_margin_end(10);
 
+    {
+        let mut s = state.borrow_mut();
+        let data = LibraryData::load();
+        for item in data.items {
+            let path = PathBuf::from(&item.path);
+            if !path.exists() {
+                continue;
+            }
+            let child = make_library_child(&path, &item.name);
+            flow_box.append(&child);
+            s.library.push(LibraryItem {
+                path,
+                name: item.name,
+                size: item.size,
+                speed: item.speed,
+            });
+        }
+        log::info!("Loaded {} items from library", s.library.len());
+    }
+
     let left_scroll = ScrolledWindow::builder()
         .child(&flow_box)
         .vexpand(true)
@@ -100,7 +168,6 @@ pub fn show(app: &Application) {
     right_box.set_margin_end(14);
     right_box.set_width_request(320);
 
-    // Контейнер под анимированное превью — пересобираем содержимое на каждый выбор.
     let preview_container = GtkBox::new(Orientation::Vertical, 0);
     preview_container.set_size_request(240, 240);
     preview_container.set_halign(Align::Center);
@@ -247,6 +314,7 @@ pub fn show(app: &Application) {
                         }
                         let child = make_library_child(&path, &name);
                         flow_box.append(&child);
+                        persist_library(&state);
                     }
                 }
             });
@@ -295,6 +363,7 @@ pub fn show(app: &Application) {
                 }
             };
             update_preview(&preview_container, Some(&path), v, speed);
+            persist_library(&state);
         });
     }
 
@@ -317,6 +386,7 @@ pub fn show(app: &Application) {
                 }
             };
             update_preview(&preview_container, Some(&path), size, v);
+            persist_library(&state);
         });
     }
 
@@ -356,10 +426,12 @@ pub fn show(app: &Application) {
 
             let is_gif = ext == "gif";
             let is_video = matches!(ext.as_str(), "mp4" | "webm" | "mkv" | "mov" | "avi");
+            let is_webp = ext == "webp";
+            let is_animated_webp = is_webp && crate::ai::webp_remover::is_animated_webp(&path);
 
-            if remove_bg_now && (is_gif || is_video) {
+            if remove_bg_now && (is_gif || is_video || is_animated_webp) {
                 let cache_dir = dirs::cache_dir()
-                    .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+                    .unwrap_or_else(|| PathBuf::from("/tmp"))
                     .join("anima-linux");
                 let _ = std::fs::create_dir_all(&cache_dir);
                 let stamp = std::time::SystemTime::now()
@@ -368,6 +440,8 @@ pub fn show(app: &Application) {
                     .unwrap_or(0);
                 let processed = if is_gif {
                     cache_dir.join(format!("processed_{}.gif", stamp))
+                } else if is_animated_webp {
+                    cache_dir.join(format!("processed_{}.webp", stamp))
                 } else {
                     cache_dir.join(format!("processed_{}.webm", stamp))
                 };
@@ -427,6 +501,16 @@ pub fn show(app: &Application) {
                             *lock = (cur, if total == 0 { cur } else { total });
                         })
                         .map_err(|e| e.to_string())
+                    } else if is_animated_webp {
+                        crate::ai::webp_remover::process_animated_webp(
+                            &path_s,
+                            &processed_s,
+                            |cur, total| {
+                                let mut lock = ps_thread.lock().unwrap();
+                                *lock = (cur, if total == 0 { cur } else { total });
+                            },
+                        )
+                        .map_err(|e| e.to_string())
                     } else {
                         crate::ai::video_remover::process_video(
                             &path_s,
@@ -479,6 +563,8 @@ pub fn show(app: &Application) {
                             size,
                             speed,
                             path_c.clone(),
+                            100,
+                            100,
                         );
                         glib::ControlFlow::Break
                     } else {
@@ -491,7 +577,7 @@ pub fn show(app: &Application) {
 
             let actual_path = if remove_bg_now {
                 let cache_dir = dirs::cache_dir()
-                    .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+                    .unwrap_or_else(|| PathBuf::from("/tmp"))
                     .join("anima-linux");
                 let _ = std::fs::create_dir_all(&cache_dir);
                 let processed = cache_dir.join(format!(
@@ -525,6 +611,8 @@ pub fn show(app: &Application) {
                 size,
                 speed,
                 path.clone(),
+                100,
+                100,
             );
         });
     }
@@ -568,6 +656,8 @@ pub fn show(app: &Application) {
             name_label.set_text("—");
             log::info!("Removed from library: {}", removed_path.display());
 
+            persist_library(&state);
+            persist_overlays(&state);
             rebuild_overlays(&overlays_list, &state);
         });
     }
@@ -582,11 +672,69 @@ pub fn show(app: &Application) {
                     entry.window.close();
                 }
             }
+            persist_overlays(&state);
             rebuild_overlays(&overlays_list, &state);
         });
     }
 
+    {
+        let state = state.clone();
+        window.connect_close_request(move |win| {
+            persist_library(&state);
+            persist_overlays(&state);
+            {
+                let mut s = state.borrow_mut();
+                for entry in s.overlays.drain(..) {
+                    entry.window.close();
+                }
+            }
+            if let Some(app) = win.application() {
+                let app_clone = app.clone();
+                glib::idle_add_local_once(move || {
+                    app_clone.quit();
+                });
+            }
+            glib::Propagation::Proceed
+        });
+    }
+
     window.present();
+
+    restore_overlays(&state, &window, &overlays_list);
+}
+
+fn restore_overlays(
+    state: &Rc<RefCell<AppState>>,
+    window: &gtk4::ApplicationWindow,
+    overlays_list: &ListBox,
+) {
+    let data = OverlaysFile::load();
+    if data.items.is_empty() {
+        return;
+    }
+
+    log::info!("Restoring {} overlays", data.items.len());
+
+    for item in data.items {
+        let src = PathBuf::from(&item.source);
+        if !src.exists() {
+            log::warn!("Overlay source missing, skipping: {}", item.source);
+            continue;
+        }
+
+        spawn_overlay(
+            window,
+            state,
+            overlays_list,
+            &item.source,
+            &item.name,
+            item.size,
+            item.speed,
+            src,
+            item.x,
+            item.y,
+        );
+    }
 }
 
 fn update_preview(
@@ -595,14 +743,12 @@ fn update_preview(
     size: i32,
     speed: f64,
 ) {
-    // Снести предыдущего ребёнка.
     while let Some(child) = container.first_child() {
         container.remove(&child);
     }
 
     let Some(path) = path else { return };
 
-    // Клампим размер, чтобы влезло в панель 240x240.
     let preview_size = size.clamp(32, 220);
     let path_str = path.to_string_lossy().to_string();
     let widget = crate::overlay::renderer::create_image_widget(&path_str, preview_size, speed);
@@ -611,6 +757,7 @@ fn update_preview(
     container.append(&widget);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_overlay(
     window: &gtk4::ApplicationWindow,
     state: &Rc<RefCell<AppState>>,
@@ -620,27 +767,41 @@ fn spawn_overlay(
     size: i32,
     speed: f64,
     source: PathBuf,
+    pos_x: i32,
+    pos_y: i32,
 ) {
     let cfg = Config {
         file_path: path.to_string(),
-        position_x: 100,
-        position_y: 100,
+        position_x: pos_x,
+        position_y: pos_y,
         width: size,
         height: size,
         remove_bg: false,
+        ..Config::default()
     };
 
     let overlay_app = window.application().unwrap();
     let overlay_win = layer_surface::create_overlay_window(&overlay_app, &cfg);
     let widget = crate::overlay::renderer::create_image_widget(path, size, speed);
     overlay_win.set_child(Some(&widget));
-    layer_surface::make_draggable(&overlay_win, &cfg);
+
+    let position = Rc::new(Cell::new((pos_x, pos_y)));
+
+    let state_c = state.clone();
+    let on_change: Rc<dyn Fn()> = Rc::new(move || {
+        persist_overlays(&state_c);
+    });
+
+    layer_surface::make_draggable(&widget, &overlay_win, &cfg, position.clone(), on_change);
     overlay_win.present();
 
     state.borrow_mut().overlays.push(OverlayEntry {
         window: overlay_win,
         label: name.to_string(),
         source,
+        size,
+        speed,
+        position,
     });
 
     rebuild_overlays(overlays_list, state);
@@ -685,6 +846,7 @@ fn rebuild_overlays(list: &ListBox, state: &Rc<RefCell<AppState>>) {
                     entry.window.close();
                 }
             }
+            persist_overlays(&state_c);
             rebuild_overlays(&list_c, &state_c);
         });
         hbox.append(&close_btn);
@@ -696,123 +858,24 @@ fn rebuild_overlays(list: &ListBox, state: &Rc<RefCell<AppState>>) {
 
 fn setup_css() {
     let provider = gtk4::CssProvider::new();
-    provider.load_from_string(
-        "
-        window.anima-main {
-            background-color: #1a1a1a;
-            color: #e6e6e6;
+
+    let user_path = dirs::config_dir()
+        .map(|p| p.join("anima-linux").join("style.css"));
+
+    let mut loaded_from_user = false;
+    if let Some(path) = user_path.as_ref() {
+        if path.exists() {
+            provider.load_from_path(path);
+            loaded_from_user = true;
+            log::info!("Loaded CSS from {}", path.display());
         }
-        window.anima-overlay {
-            background-color: transparent;
-            background-image: none;
-        }
-        window.anima-overlay > * {
-            background-color: transparent;
-            background-image: none;
-        }
-        .anima-title {
-            font-size: 1.05em;
-            font-weight: 600;
-            color: #cfcfcf;
-        }
-        button {
-            background-image: none;
-            background-color: #2d2d2d;
-            color: #e6e6e6;
-            border: 1px solid #3a3a3a;
-            border-radius: 6px;
-            padding: 6px 12px;
-            box-shadow: none;
-            text-shadow: none;
-        }
-        button:hover {
-            background-color: #3a3a3a;
-        }
-        button.anima-primary {
-            background-color: #5b3d99;
-            color: #ffffff;
-            border: 1px solid #7c5cbf;
-            font-weight: 600;
-        }
-        button.anima-primary:hover {
-            background-color: #6b4da9;
-        }
-        button.anima-primary:active {
-            background-color: #4b2d89;
-        }
-        button.anima-danger {
-            background-color: #6b2e2e;
-            color: #ffdddd;
-            border: 1px solid #8b3a3a;
-        }
-        button.anima-danger:hover {
-            background-color: #7b3e3e;
-        }
-        flowboxchild {
-            background-color: #252525;
-            border-radius: 8px;
-            padding: 8px;
-            border: 1px solid #2f2f2f;
-        }
-        flowboxchild:hover {
-            background-color: #2d2d2d;
-            border-color: #4a4a4a;
-        }
-        flowboxchild:selected {
-            border-color: #7c5cbf;
-            background-color: #2a2333;
-        }
-        frame {
-            background-color: #1a1a1a;
-            border: 1px solid #2f2f2f;
-            border-radius: 8px;
-        }
-        scale trough {
-            background-color: #2d2d2d;
-            border-radius: 6px;
-        }
-        scale highlight {
-            background-color: #7c5cbf;
-        }
-        progressbar trough {
-            background-color: #2d2d2d;
-            border-radius: 6px;
-            min-height: 8px;
-        }
-        progressbar progress {
-            background-color: #7c5cbf;
-            border-radius: 6px;
-            min-height: 8px;
-        }
-        entry, searchentry {
-            background-color: #2d2d2d;
-            color: #e6e6e6;
-            border-radius: 6px;
-            padding: 4px 8px;
-            border: 1px solid #3a3a3a;
-        }
-        listbox {
-            background-color: #202020;
-            border-radius: 6px;
-        }
-        listboxrow {
-            background-color: #252525;
-            border-bottom: 1px solid #2f2f2f;
-        }
-        listboxrow:hover {
-            background-color: #2d2d2d;
-        }
-        separator {
-            background-color: #2f2f2f;
-        }
-        checkbutton {
-            color: #e6e6e6;
-        }
-        .dim-label {
-            opacity: 0.6;
-        }
-        ",
-    );
+    }
+
+    if !loaded_from_user {
+        provider.load_from_string(include_str!("../../assets/style.css"));
+        log::info!("Loaded CSS from embedded assets/style.css");
+    }
+
     if let Some(display) = gdk::Display::default() {
         gtk4::style_context_add_provider_for_display(
             &display,

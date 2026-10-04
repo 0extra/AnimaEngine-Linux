@@ -11,8 +11,49 @@ use ort::session::Session;
 use ort::value::Value;
 
 static SESSION: OnceLock<Mutex<Session>> = OnceLock::new();
+static MODEL_FILE: OnceLock<String> = OnceLock::new();
+static INPUT_SIZE: OnceLock<u32> = OnceLock::new();
+static MODELS_DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
+
+pub fn configure(model: &str, input_size: Option<u32>, models_dir: Option<&str>) {
+    let filename = match model {
+        "u2netp" => "u2netp.onnx",
+        "silueta" => "silueta.onnx",
+        "isnet-general-use" => "isnet-general-use.onnx",
+        _ => "u2net.onnx",
+    };
+    let _ = MODEL_FILE.set(filename.to_string());
+
+    let default_size = match model {
+        "isnet-general-use" => 1024,
+        _ => 320,
+    };
+    let _ = INPUT_SIZE.set(input_size.unwrap_or(default_size));
+
+    let _ = MODELS_DIR.set(models_dir.map(PathBuf::from));
+
+    log::info!(
+        "AI remover configured: model={} input={} dir={:?}",
+        filename,
+        input_size.unwrap_or(default_size),
+        models_dir
+    );
+}
+
+fn current_model_file() -> &'static str {
+    MODEL_FILE
+        .get()
+        .map(|s| s.as_str())
+        .unwrap_or("u2net.onnx")
+}
+
+fn current_input_size() -> u32 {
+    *INPUT_SIZE.get().unwrap_or(&320)
+}
 
 fn find_model() -> Option<PathBuf> {
+    let filename = current_model_file();
+
     if let Ok(p) = env::var("ANIMA_MODEL_PATH") {
         let pb = PathBuf::from(p);
         if pb.exists() {
@@ -23,35 +64,44 @@ fn find_model() -> Option<PathBuf> {
         }
     }
 
-    let candidates: Vec<PathBuf> = {
-        let mut v = Vec::new();
+    if let Some(Some(dir)) = MODELS_DIR.get() {
+        let p = dir.join(filename);
+        if p.exists() {
+            log::info!("Using model from models_dir: {}", p.display());
+            return Some(p);
+        }
+    }
 
-        v.push(PathBuf::from("models/u2net.onnx"));
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    candidates.push(PathBuf::from("models").join(filename));
 
-        if let Ok(exe) = env::current_exe() {
-            if let Some(dir) = exe.parent() {
-                v.push(dir.join("models/u2net.onnx"));
-                if let Some(up1) = dir.parent() {
-                    if let Some(up2) = up1.parent() {
-                        v.push(up2.join("models/u2net.onnx"));
-                    }
+    if let Ok(exe) = env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("models").join(filename));
+            if let Some(up1) = dir.parent() {
+                if let Some(up2) = up1.parent() {
+                    candidates.push(up2.join("models").join(filename));
                 }
             }
         }
+    }
 
-        if let Some(data_dir) = dirs::data_dir() {
-            v.push(data_dir.join("anima-linux/models/u2net.onnx"));
-        }
-        if let Some(home) = dirs::home_dir() {
-            v.push(home.join(".local/share/anima-linux/models/u2net.onnx"));
-        }
+    candidates.push(PathBuf::from("/usr/share/anima-linux/models").join(filename));
+    candidates.push(PathBuf::from("/usr/local/share/anima-linux/models").join(filename));
 
-        v
-    };
+    if let Some(data_dir) = dirs::data_dir() {
+        candidates.push(data_dir.join("anima-linux/models").join(filename));
+    }
+    if let Some(cfg) = dirs::config_dir() {
+        candidates.push(cfg.join("anima-linux/models").join(filename));
+    }
+    if let Some(home) = dirs::home_dir() {
+        candidates.push(home.join(".local/share/anima-linux/models").join(filename));
+    }
 
     for c in &candidates {
         if c.exists() {
-            log::info!("Found U²-Net model at: {}", c.display());
+            log::info!("Found model at: {}", c.display());
             return Some(c.clone());
         }
     }
@@ -68,14 +118,18 @@ fn get_session() -> Result<&'static Mutex<Session>> {
         anyhow!(
             "Model not found. Looked in:\n\
              - $ANIMA_MODEL_PATH\n\
-             - ./models/u2net.onnx\n\
-             - <exe_dir>/models/u2net.onnx\n\
-             - <exe_dir>/../../models/u2net.onnx\n\
-             - ~/.local/share/anima-linux/models/u2net.onnx\n\
+             - ./models/{}\n\
+             - <exe_dir>/models/{}\n\
+             - /usr/share/anima-linux/models/{}\n\
+             - ~/.local/share/anima-linux/models/{}\n\
              \n\
              Download it with:\n\
              mkdir -p models && \\\n\
-             wget https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net.onnx -P models/"
+             wget https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net.onnx -P models/",
+            current_model_file(),
+            current_model_file(),
+            current_model_file(),
+            current_model_file()
         )
     })?;
 
@@ -93,11 +147,12 @@ fn get_session() -> Result<&'static Mutex<Session>> {
 
 pub fn remove_bg_image(rgba: &RgbaImage) -> Result<RgbaImage> {
     let (orig_w, orig_h) = rgba.dimensions();
+    let input_size = current_input_size();
 
     let dynamic = DynamicImage::ImageRgba8(rgba.clone()).to_rgb8();
-    let resized = image::imageops::resize(&dynamic, 320, 320, FilterType::Triangle);
+    let resized = image::imageops::resize(&dynamic, input_size, input_size, FilterType::Triangle);
 
-    let mut input = Array4::<f32>::zeros((1, 3, 320, 320));
+    let mut input = Array4::<f32>::zeros((1, 3, input_size as usize, input_size as usize));
     for (x, y, pixel) in resized.enumerate_pixels() {
         let [r, g, b] = pixel.0;
         input[[0, 0, y as usize, x as usize]] = r as f32 / 255.0;
@@ -123,12 +178,15 @@ pub fn remove_bg_image(rgba: &RgbaImage) -> Result<RgbaImage> {
     let mask_w = shape[3];
     let data: Vec<f32> = output_array.iter().cloned().collect();
 
-    // U²-Net output already in [0, 1] via sigmoid. No min/max normalization.
     let mut mask_img = image::GrayImage::new(mask_w as u32, mask_h as u32);
     for y in 0..mask_h {
         for x in 0..mask_w {
             let idx = y * mask_w + x;
-            let v = (data[idx].clamp(0.0, 1.0) * 255.0) as u8;
+            let v = if data[idx].is_finite() {
+                (data[idx].clamp(0.0, 1.0) * 255.0) as u8
+            } else {
+                0
+            };
             mask_img.put_pixel(x as u32, y as u32, image::Luma([v]));
         }
     }

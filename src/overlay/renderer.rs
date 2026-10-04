@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
 
+use gtk4::gdk;
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::Image;
@@ -9,6 +10,43 @@ use gtk4::Image;
 use crate::utils::gif;
 use crate::utils::video;
 use crate::utils::webp;
+
+fn probe_video_size(path: &Path) -> Option<(i32, i32)> {
+    use gstreamer as gst;
+    use gstreamer_pbutils as gst_pbutils;
+
+    gst::init().ok()?;
+
+    let abs = path.canonicalize().ok()?;
+    let uri = gst::glib::filename_to_uri(&abs, None).ok()?;
+
+    let discoverer = gst_pbutils::Discoverer::new(gst::ClockTime::from_seconds(5)).ok()?;
+    let info = discoverer.discover_uri(&uri).ok()?;
+    let streams = info.video_streams();
+    let v = streams.first()?;
+    let w = v.width() as i32;
+    let h = v.height() as i32;
+
+    if w > 0 && h > 0 {
+        Some((w, h))
+    } else {
+        None
+    }
+}
+
+fn fit_square(iw: i32, ih: i32, size: i32) -> (i32, i32) {
+    if iw <= 0 || ih <= 0 || size <= 0 {
+        return (size.max(1), size.max(1));
+    }
+    let aspect = iw as f64 / ih as f64;
+    if aspect >= 1.0 {
+        let h = ((size as f64) / aspect).round() as i32;
+        (size.max(1), h.max(1))
+    } else {
+        let w = ((size as f64) * aspect).round() as i32;
+        (w.max(1), size.max(1))
+    }
+}
 
 pub fn create_image_widget(file_path: &str, size: i32, speed: f64) -> gtk4::Widget {
     let path = Path::new(file_path);
@@ -21,27 +59,40 @@ pub fn create_image_widget(file_path: &str, size: i32, speed: f64) -> gtk4::Widg
 
     if matches!(ext.as_str(), "mp4" | "webm" | "mkv" | "mov" | "avi") {
         if let Some(mut handle) = video::create_video(path) {
-            let picture = gtk4::Picture::for_paintable(&handle.paintable);
-            picture.set_content_fit(gtk4::ContentFit::Contain);
-            picture.set_can_shrink(true);
-            picture.set_size_request(size, size);
+            let (fw, fh) = match probe_video_size(path) {
+                Some((iw, ih)) => fit_square(iw, ih, size),
+                None => (size.max(1), size.max(1)),
+            };
 
-            let fixed = gtk4::Fixed::new();
-            fixed.set_size_request(size, size);
-            fixed.set_overflow(gtk4::Overflow::Hidden);
-            fixed.set_halign(gtk4::Align::Center);
-            fixed.set_valign(gtk4::Align::Center);
-            fixed.put(&picture, 0.0, 0.0);
+            let picture = gtk4::Picture::for_paintable(&handle.paintable);
+            picture.set_content_fit(gtk4::ContentFit::Fill);
+            picture.set_can_shrink(true);
+            picture.set_size_request(fw, fh);
+            picture.set_hexpand(false);
+            picture.set_vexpand(false);
+
+            let container = gtk4::ScrolledWindow::builder()
+                .hscrollbar_policy(gtk4::PolicyType::Never)
+                .vscrollbar_policy(gtk4::PolicyType::Never)
+                .propagate_natural_width(false)
+                .propagate_natural_height(false)
+                .child(&picture)
+                .build();
+            container.set_size_request(fw, fh);
+            container.set_hexpand(false);
+            container.set_vexpand(false);
+            container.set_halign(gtk4::Align::Center);
+            container.set_valign(gtk4::Align::Center);
 
             if (speed - 1.0).abs() > 0.01 {
                 video::set_rate(&mut handle, speed);
             }
 
             let handle_rc = Rc::new(handle);
-            fixed.connect_unrealize(move |_| {
+            container.connect_unrealize(move |_| {
                 video::stop(&handle_rc);
             });
-            return fixed.upcast();
+            return container.upcast();
         } else {
             log::error!("Failed to create GStreamer pipeline for {}", file_path);
         }
@@ -101,18 +152,12 @@ pub fn create_image_widget(file_path: &str, size: i32, speed: f64) -> gtk4::Widg
 
 fn play_next_frame(
     image: Image,
-    frames: Rc<Vec<(gtk4::gdk::MemoryTexture, u32)>>,
+    frames: Rc<Vec<(gdk::MemoryTexture, u32)>>,
     current: Rc<RefCell<usize>>,
     size: i32,
     speed: f64,
     source_holder: Rc<RefCell<Option<glib::SourceId>>>,
 ) {
-    // Widget was unrealized — stop the loop.
-    if source_holder.borrow().is_none() && !image.is_realized() {
-        // Only bail if we've been explicitly cancelled (unrealize handler fired).
-        // is_realized() is false before first present, so we check both.
-    }
-
     let idx = *current.borrow();
     let (texture, delay) = &frames[idx];
     image.set_paintable(Some(texture));
@@ -135,7 +180,6 @@ fn play_next_frame(
     let id = glib::timeout_add_local_once(
         std::time::Duration::from_millis(next_delay),
         move || {
-            // If unrealize fired, holder is None and we stop.
             if holder_clone.borrow().is_none() && !image_clone.is_realized() {
                 return;
             }
